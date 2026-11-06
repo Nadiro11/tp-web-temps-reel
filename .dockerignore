@@ -1,0 +1,14 @@
+node_modules
+.npm-cache
+dist
+data
+.git
+tmp
+temp
+*.log
+*.tmp
+*.tsbuildinfo
+.env
+.env.*
+.DS_Store
+Thumbs.db

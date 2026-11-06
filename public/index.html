@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Suivi de commandes</title>
+    <style>
+      body { max-width: 600px; margin: 3rem auto; padding: 0 1rem; font-family: sans-serif; line-height: 1.6; }
+      dt { font-weight: bold; }
+      dd { margin: 0 0 1rem; }
+      #error { color: #a00; }
+      #connection { color: #444; }
+    </style>
+  </head>
+  <body>
+    <h1>Suivi de commandes</h1>
+    <p id="error" role="alert"></p>
+    <dl id="details" hidden>
+      <dt>Numéro de commande</dt>
+      <dd id="order-number"></dd>
+      <dt>Statut</dt>
+      <dd id="order-status" aria-live="polite"></dd>
+      <dt>Produit</dt>
+      <dd id="product"></dd>
+      <dt>Quantité</dt>
+      <dd id="quantity"></dd>
+    </dl>
+    <p id="connection" role="status">Chargement de la commande…</p>
+
+    <script>
+      const details = document.getElementById("details");
+      const errorMessage = document.getElementById("error");
+      const connection = document.getElementById("connection");
+      const statuses = {
+        preparing: "En préparation",
+        shipped: "Expédiée",
+        delivered: "Livrée",
+        cancelled: "Annulée",
+      };
+      let source;
+
+      function render(order) {
+        document.getElementById("order-number").textContent = order.id;
+        document.getElementById("order-status").textContent = statuses[order.status];
+        document.getElementById("quantity").textContent = order.quantity;
+        details.hidden = false;
+      }
+
+      async function loadOrder() {
+        const value = new URLSearchParams(window.location.search).get("orderId");
+        const orderId = Number(value);
+        if (!value || !/^\d+$/.test(value) || !Number.isSafeInteger(orderId) || orderId <= 0) {
+          errorMessage.textContent = "Indiquez un identifiant de commande entier strictement positif, par exemple ?orderId=1.";
+          connection.textContent = "Suivi en direct non connecté.";
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/orders/${orderId}`);
+          if (!response.ok) {
+            throw new Error(response.status === 404
+              ? "Cette commande n'existe pas."
+              : "Impossible de charger la commande.");
+          }
+          const order = await response.json();
+          render(order);
+          document.getElementById("product").textContent = `Produit n° ${order.productId}`;
+
+          connection.textContent = "Connexion au suivi en direct…";
+          source = new EventSource(`/api/orders/${orderId}/events`);
+          source.onopen = () => {
+            connection.textContent = "Suivi en direct connecté.";
+          };
+          source.addEventListener("order-updated", (e) => {
+            const updatedOrder = JSON.parse(e.data);
+            render(updatedOrder);
+          });
+          source.onerror = () => {
+            connection.textContent = "Connexion au suivi interrompue. Reconnexion automatique en cours…";
+          };
+
+          // Le nom du produit est facultatif : son chargement ne bloque pas le suivi.
+          try {
+            const productsResponse = await fetch("/api/products");
+            if (productsResponse.ok) {
+              const products = await productsResponse.json();
+              const product = products.find((entry) => entry.id === order.productId);
+              if (product) document.getElementById("product").textContent = product.name;
+            }
+          } catch {
+            // Conserver le numéro du produit si son nom n'est pas disponible.
+          }
+        } catch (error) {
+          errorMessage.textContent = error instanceof Error ? error.message : "Impossible de charger la commande.";
+          connection.textContent = "Suivi en direct non connecté.";
+        }
+      }
+
+      window.addEventListener("pagehide", () => {
+        if (source) source.close();
+      });
+
+      loadOrder();
+    </script>
+  </body>
+</html>
